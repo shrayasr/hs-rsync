@@ -27,9 +27,8 @@ fileSignatures bs blockSize = zip3 strongsigs weaksigs [0..]
 
 splitBS :: BL.ByteString -> Integer -> [BL.ByteString]
 splitBS bs blockSize | fromIntegral (BL.length bs) < blockSize = [bs]
-splitBS bs blockSize | otherwise =
-                         (BL.take (fromIntegral blockSize) bs) :
-                         splitBS (BL.drop (fromIntegral blockSize) bs) blockSize
+splitBS bs blockSize = BL.take (fromIntegral blockSize) bs :
+  splitBS (BL.drop (fromIntegral blockSize) bs) blockSize
 
 -- compute md4 digest (128 bits)
 blockSig :: BL.ByteString -> BS.ByteString
@@ -49,7 +48,7 @@ genInstructions f0sigs blockSize fnew =
   evalState (go fnew) 0
   where
     go :: BL.ByteString -> State Word32 [Instruction]
-    go fnew | (fnew == BL.empty) = return []
+    go fnew | fnew == BL.empty = return []
             | otherwise =
                 let (blk, blks) = BL.splitAt (fromIntegral blockSize) fnew
                     adlerSum    = weakSig blk
@@ -66,8 +65,10 @@ genInstructions f0sigs blockSize fnew =
                           Just i -> do
                             is <- go blks
                             return $ RBlk (head i) : is
-                          Nothing ->
-                            return [RChar (BL.head blk)]
+                          Nothing -> do
+                            put adlerSum
+                            is <- go (BL.tail (blk `mappend` blks))
+                            return $ RChar (BL.head blk) : is
     f0AdlerTable = toAdlerMap f0sigs
     f0MD4Table   = toMD4Map f0sigs
 
@@ -88,5 +89,5 @@ recreate f0 blockSize ins =
         go f0blocks (inst:insts) =
           case inst of
             RBlk i  -> (f0blocks !! i) `mappend` go f0blocks insts
-            RChar w -> (BL.singleton w) `mappend` go f0blocks insts
+            RChar w -> BL.singleton w `mappend` go f0blocks insts
 
