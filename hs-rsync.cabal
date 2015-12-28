@@ -18,7 +18,10 @@ library
   exposed-modules:     Lib
   build-depends:       base >= 4.7 && < 5
                      , bytestring
+                     , containers
                      , cryptohash
+                     , digest
+                     , mtl
   default-language:    Haskell2010
 
 executable hs-rsync-exe
