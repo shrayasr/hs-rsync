@@ -6,10 +6,8 @@ module Lib
     ) where
 
 import Control.Monad.State
-import Data.Bits (shiftL, (.&.), (.|.))
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy as BL
-import Data.Char (ord)
 import Data.Digest.Adler32 (adler32)
 import qualified Data.Map as M
 import Data.Word (Word8, Word32)
