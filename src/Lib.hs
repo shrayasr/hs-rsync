@@ -8,7 +8,7 @@ module Lib
 import Control.Monad.State
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy as BL
-import Data.Digest.Adler32 (adler32)
+import Data.Digest.Adler32 (adler32, adler32Update)
 import qualified Data.Map as M
 import Data.Word (Word8, Word32)
 import qualified Crypto.Hash.MD4 as MD4
@@ -41,24 +41,26 @@ data Instruction = RChar Word8
 
 genInstructions :: [Signature] -> Integer -> BL.ByteString -> [Instruction]
 genInstructions f0sigs blockSize fnew =
-  evalState (go fnew) 0
+  evalState (go fnew) sig0
   where
-    go :: BL.ByteString -> State Word32 [Instruction]
+    sig0 = weakSig $ BL.take (fromIntegral blockSize) fnew
+    go :: BL.ByteString -> State Adler32checksum [Instruction]
     go fnew | fnew == BL.empty = return []
-            | otherwise =
+            | otherwise = do
                 let (blk, blks) = BL.splitAt (fromIntegral blockSize) fnew
-                    adlerSum    = weakSig blk
-                    matches     = M.lookup adlerSum f0AdlerTable >>
+                adlerSum <- get
+                let matches = M.lookup adlerSum f0AdlerTable >>
                       M.lookup (blockSig blk) f0MD4Table
-                in
-                  case matches of
-                    Just idxs -> do
-                      is <- go blks
-                      return $ RBlk (head idxs) : is
-                    Nothing -> do
-                      put adlerSum
-                      is <- go (BL.tail (blk `mappend` blks))
-                      return $ RChar (BL.head blk) : is
+                case matches of
+                  Just idxs -> do
+                    modify (`adler32Update` blk)
+                    is <- go blks
+                    return $ RBlk (head idxs) : is
+                  Nothing -> do
+                    let c = BL.head blk
+                    modify (`adler32Update`  BL.singleton c)
+                    is <- go (BL.tail (blk `mappend` blks))
+                    return $ RChar c : is
     f0AdlerTable = toAdlerMap f0sigs
     f0MD4Table   = toMD4Map f0sigs
 
