@@ -43,8 +43,6 @@ data Instruction = RChar Word8
 
 genInstructions :: [Signature] -> Integer -> BL.ByteString -> [Instruction]
 genInstructions f0sigs blockSize fnew =
-    -- create two hash tables one with adler32 as key and list of block numbers as values
-    -- another with md4sum as key and block numbers as values.
   evalState (go fnew) 0
   where
     go :: BL.ByteString -> State Word32 [Instruction]
@@ -52,23 +50,17 @@ genInstructions f0sigs blockSize fnew =
             | otherwise =
                 let (blk, blks) = BL.splitAt (fromIntegral blockSize) fnew
                     adlerSum    = weakSig blk
+                    matches     = M.lookup adlerSum f0AdlerTable >>
+                      M.lookup (blockSig blk) f0MD4Table
                 in
-                  case M.lookup adlerSum f0AdlerTable of
+                  case matches of
+                    Just idxs -> do
+                      is <- go blks
+                      return $ RBlk (head idxs) : is
                     Nothing -> do
                       put adlerSum
                       is <- go (BL.tail (blk `mappend` blks))
                       return $ RChar (BL.head blk) : is
-                    Just _ ->
-                      let md4sum = blockSig blk
-                      in
-                        case M.lookup md4sum f0MD4Table of
-                          Just i -> do
-                            is <- go blks
-                            return $ RBlk (head i) : is
-                          Nothing -> do
-                            put adlerSum
-                            is <- go (BL.tail (blk `mappend` blks))
-                            return $ RChar (BL.head blk) : is
     f0AdlerTable = toAdlerMap f0sigs
     f0MD4Table   = toMD4Map f0sigs
 
