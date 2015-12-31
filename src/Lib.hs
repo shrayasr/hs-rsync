@@ -83,3 +83,10 @@ recreate f0 blockSize ins =
             RBlk i  -> (f0blocks !! i) `mappend` go f0blocks insts
             RChar w -> BL.singleton w `mappend` go f0blocks insts
 
+rollingChecksum :: Int -> Int -> BL.ByteString -> Word32
+rollingChecksum strtIdx lenBS bs = a `mod` m + ((fromIntegral b) `mod` m) * m
+  where a    = BL.foldl (\acc x -> acc + (fromIntegral x)) 0 bs'
+        b    = BL.foldl (\acc x -> acc + x) 0 (BL.pack wbs')
+        bs'  = BL.take (fromIntegral lenBS) $ BL.drop (fromIntegral strtIdx) bs
+        m    = 2^16
+        wbs' = BL.zipWith (*) (BL.pack (reverse (map fromIntegral [1..(lenBS - strtIdx + 1)]))) bs'
