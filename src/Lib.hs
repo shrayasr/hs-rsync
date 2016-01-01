@@ -6,6 +6,7 @@ module Lib
     ) where
 
 import Control.Monad.State
+import Data.Bits (shiftR, (.&.))
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy as BL
 import Data.Digest.Adler32 (adler32, adler32Update)
@@ -41,26 +42,27 @@ data Instruction = RChar Word8
 
 genInstructions :: [Signature] -> Integer -> BL.ByteString -> [Instruction]
 genInstructions f0sigs blockSize fnew =
-  evalState (go fnew) sig0
+  evalState (go 0 fnew) sig0
   where
     sig0 = weakSig $ BL.take (fromIntegral blockSize) fnew
-    go :: BL.ByteString -> State Adler32checksum [Instruction]
-    go fnew | fnew == BL.empty = return []
-            | otherwise = do
-                let (blk, blks) = BL.splitAt (fromIntegral blockSize) fnew
-                adlerSum <- get
-                let matches = M.lookup adlerSum f0AdlerTable >>
-                      M.lookup (blockSig blk) f0MD4Table
-                case matches of
-                  Just idxs -> do
-                    modify (`adler32Update` blk)
-                    is <- go blks
-                    return $ RBlk (head idxs) : is
-                  Nothing -> do
-                    let c = BL.head blk
-                    modify (`adler32Update`  BL.singleton c)
-                    is <- go (BL.tail (blk `mappend` blks))
-                    return $ RChar c : is
+    go :: Integer -> BL.ByteString -> State Adler32checksum [Instruction]
+    go startIdx fnew | fnew == BL.empty = return []
+                     | otherwise = do
+                         let (blk, blks) = BL.splitAt (fromIntegral blockSize) fnew
+                             endIdx      = startIdx + fromIntegral (BL.length blk) - 1
+                         adlerSum <- get
+                         let matches = M.lookup adlerSum f0AdlerTable >>
+                               M.lookup (blockSig blk) f0MD4Table
+                         case matches of
+                           Just idxs -> do
+                             modify (`adler32Update` blk)
+                             is <- go (endIdx + 1) blks
+                             return $ RBlk (head idxs) : is
+                           Nothing -> do
+                             let c = BL.head blk
+                             modify (`adler32Update`  BL.singleton c)
+                             is <- go (startIdx + 1) (BL.tail (blk `mappend` blks))
+                             return $ RChar c : is
     f0AdlerTable = toAdlerMap f0sigs
     f0MD4Table   = toMD4Map f0sigs
 
@@ -90,3 +92,15 @@ rollingChecksum strtIdx lenBS bs = a `mod` m + ((fromIntegral b) `mod` m) * m
         bs'  = BL.take (fromIntegral lenBS) $ BL.drop (fromIntegral strtIdx) bs
         m    = 2^16
         wbs' = BL.zipWith (*) (BL.pack (reverse (map fromIntegral [1..(lenBS - strtIdx + 1)]))) bs'
+
+-- given the checksum of bytes from index: startIdx to endIdx, find
+-- the checksum for the block from (startIdx + 1 .. endIdx + 1)
+rollingChecksumUpdate :: Word32 -> Word8 -> Word8 -> Integer -> Integer -> Word32
+rollingChecksumUpdate oldChecksum old new strtIdx endIdx =
+  let b_Old = (oldChecksum `shiftR` 16) .&. 0xff
+      a_Old = (oldChecksum .&. 0xff)
+      a_New = (a_Old - (fromIntegral old) + (fromIntegral new)) `mod` m
+      b_New = (b_Old - ((fromIntegral endIdx) - (fromIntegral strtIdx) + 1) * (fromIntegral old) + a_New) `mod` m
+      m     = 2^16
+  in
+    a_New `mod` m + (b_New `mod` m) * m
