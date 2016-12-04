@@ -6,10 +6,10 @@ module Lib
     ) where
 
 import Control.Monad.State
-import Data.Bits (shiftR, (.&.))
+import Data.Bits (shiftL, shiftR, (.&.))
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy as BL
-import Data.Digest.Adler32 (adler32, adler32Update)
+import Data.Digest.Adler32 (adler32)
 import qualified Data.Map as M
 import Data.Word (Word8, Word32)
 import qualified Crypto.Hash.MD4 as MD4
@@ -55,12 +55,15 @@ genInstructions f0sigs blockSize fnew =
                                M.lookup (blockSig blk) f0MD4Table
                          case matches of
                            Just idxs -> do
-                             modify (`adler32Update` blk)
+                             -- modify (`adler32Update` blk)
+                             put $ rollingChecksum (fromIntegral startIdx) (fromIntegral endIdx) fnew
                              is <- go (endIdx + 1) blks
                              return $ RBlk (head idxs) : is
                            Nothing -> do
-                             let c = BL.head blk
-                             modify (`adler32Update`  BL.singleton c)
+                             let c  = BL.head blk
+                                 c' = BL.head blk -- FIX (should have been blks)
+                             -- modify (`adler32Update`  BL.singleton c)
+                             put $ rollingChecksumUpdate adlerSum c c' startIdx endIdx
                              is <- go (startIdx + 1) (BL.tail (blk `mappend` blks))
                              return $ RChar c : is
     f0AdlerTable = toAdlerMap f0sigs
@@ -86,12 +89,22 @@ recreate f0 blockSize ins =
             RChar w -> BL.singleton w `mappend` go f0blocks insts
 
 rollingChecksum :: Int -> Int -> BL.ByteString -> Word32
-rollingChecksum strtIdx lenBS bs = a `mod` m + ((fromIntegral b) `mod` m) * m
+rollingChecksum strtIdx endIdx bs = a `mod` m + ((fromIntegral b) `mod` m) `shiftL` mb
   where a    = BL.foldl (\acc x -> acc + (fromIntegral x)) 0 bs'
         b    = BL.foldl (\acc x -> acc + x) 0 (BL.pack wbs')
-        bs'  = BL.take (fromIntegral lenBS) $ BL.drop (fromIntegral strtIdx) bs
+        bs'  = BL.take (fromIntegral (endIdx - strtIdx + 1)) bs
         m    = 2^16
-        wbs' = BL.zipWith (*) (BL.pack (reverse (map fromIntegral [1..(lenBS - strtIdx + 1)]))) bs'
+        mb   = 16
+        wbs' = BL.zipWith (*) (BL.pack (reverse (map fromIntegral [1..(endIdx - strtIdx + 1)]))) bs'
+
+checksum :: Int -> Int -> BL.ByteString -> Word32
+checksum strtIdx endIdx bs = a `mod` m + ((fromIntegral b) `mod` m) `shiftL` mb
+  where buffer  = map fromIntegral $ take (endIdx - strtIdx) $ drop strtIdx $ BL.unpack bs
+        indices = map fromIntegral [1..(endIdx - strtIdx + 1)]
+        a       = sum buffer
+        b       = sum $ zipWith (*) (reverse indices) buffer
+        m       = 2^size
+        size    = 16
 
 -- given the checksum of bytes from index: startIdx to endIdx, find
 -- the checksum for the block from (startIdx + 1 .. endIdx + 1)
