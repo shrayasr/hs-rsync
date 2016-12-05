@@ -90,17 +90,8 @@ recreate f0 blockSize ins =
             RBlk i  -> (f0blocks !! i) `mappend` go f0blocks insts
             RChar w -> BL.singleton w `mappend` go f0blocks insts
 
-rollingChecksum :: Int -> Int -> BL.ByteString -> Word32
-rollingChecksum strtIdx endIdx bs = a `mod` m + ((fromIntegral b) `mod` m) `shiftL` mb
-  where a    = BL.foldl (\acc x -> acc + (fromIntegral x)) 0 bs'
-        b    = BL.foldl (\acc x -> acc + x) 0 (BL.pack wbs')
-        bs'  = BL.take (fromIntegral (endIdx - strtIdx + 1)) bs
-        m    = 2^16
-        mb   = 16
-        wbs' = BL.zipWith (*) (BL.pack (reverse (map fromIntegral [1..(endIdx - strtIdx + 1)]))) bs'
-
-checksum :: BL.ByteString -> Int -> Int -> Checksum
-checksum bs strtIdx endIdx = (csval, strtIdx, endIdx)
+rollingChecksum :: BL.ByteString -> Int -> Int -> Checksum
+rollingChecksum bs strtIdx endIdx = (csval, strtIdx, endIdx)
   where csval   = a `mod` m + ((fromIntegral b) `mod` m) `shiftL` size
         buffer  = map fromIntegral $ take (endIdx - strtIdx) $ drop strtIdx $ BL.unpack bs
         indices = map fromIntegral [1..(endIdx - strtIdx + 1)]
@@ -110,8 +101,8 @@ checksum bs strtIdx endIdx = (csval, strtIdx, endIdx)
         size    = 16
 
 -- given the checksum a(k, l) and b(k, l), find checksum a(k+1, l+1), b(k+1, l+1)
-checksumUpdate :: Checksum -> BL.ByteString -> Checksum
-checksumUpdate curCheckSum bs = (csval, oldStrtIdx + 1, oldEndIdx + 1)
+rollingChecksumUpdate :: Checksum -> BL.ByteString -> Checksum
+rollingChecksumUpdate curCheckSum bs = (csval, oldStrtIdx + 1, oldEndIdx + 1)
   where (oldChecksum, oldStrtIdx, oldEndIdx) = curCheckSum
         csval   = a `mod` m + ((fromIntegral b) `mod` m) `shiftL` size
         m       = 2^size
@@ -122,15 +113,3 @@ checksumUpdate curCheckSum bs = (csval, oldStrtIdx + 1, oldEndIdx + 1)
         xlPlus1 = head $ drop (oldEndIdx + 1) $BL.unpack bs
         a       = aold - fromIntegral xk + fromIntegral xlPlus1
         b       = a + bold - (fromIntegral (oldEndIdx - oldStrtIdx + 1))
-
--- given the checksum of bytes from index: startIdx to endIdx, find
--- the checksum for the block from (startIdx + 1 .. endIdx + 1)
-rollingChecksumUpdate :: Word32 -> Word8 -> Word8 -> Integer -> Integer -> Word32
-rollingChecksumUpdate oldChecksum old new strtIdx endIdx =
-  let b_Old = (oldChecksum `shiftR` 16) .&. 0xff
-      a_Old = (oldChecksum .&. 0xff)
-      a_New = (a_Old - (fromIntegral old) + (fromIntegral new)) `mod` m
-      b_New = (b_Old - ((fromIntegral endIdx) - (fromIntegral strtIdx) + 1) * (fromIntegral old) + a_New) `mod` m
-      m     = 2^16
-  in
-    a_New `mod` m + (b_New `mod` m) * m
