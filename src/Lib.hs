@@ -17,6 +17,8 @@ import qualified Crypto.Hash.MD4 as MD4
 type Md4digest       = BS.ByteString
 type Adler32checksum = Word32
 
+type Checksum        = (Word32, Int, Int)
+
 type Signature     = (Md4digest, Adler32checksum, Int)
 
 fileSignatures :: BL.ByteString -> Integer -> [Signature]
@@ -97,14 +99,29 @@ rollingChecksum strtIdx endIdx bs = a `mod` m + ((fromIntegral b) `mod` m) `shif
         mb   = 16
         wbs' = BL.zipWith (*) (BL.pack (reverse (map fromIntegral [1..(endIdx - strtIdx + 1)]))) bs'
 
-checksum :: Int -> Int -> BL.ByteString -> Word32
-checksum strtIdx endIdx bs = a `mod` m + ((fromIntegral b) `mod` m) `shiftL` mb
-  where buffer  = map fromIntegral $ take (endIdx - strtIdx) $ drop strtIdx $ BL.unpack bs
+checksum :: BL.ByteString -> Int -> Int -> Checksum
+checksum bs strtIdx endIdx = (csval, strtIdx, endIdx)
+  where csval   = a `mod` m + ((fromIntegral b) `mod` m) `shiftL` size
+        buffer  = map fromIntegral $ take (endIdx - strtIdx) $ drop strtIdx $ BL.unpack bs
         indices = map fromIntegral [1..(endIdx - strtIdx + 1)]
         a       = sum buffer
         b       = sum $ zipWith (*) (reverse indices) buffer
         m       = 2^size
         size    = 16
+
+-- given the checksum a(k, l) and b(k, l), find checksum a(k+1, l+1), b(k+1, l+1)
+checksumUpdate :: Checksum -> BL.ByteString -> Checksum
+checksumUpdate curCheckSum bs = (csval, oldStrtIdx + 1, oldEndIdx + 1)
+  where (oldChecksum, oldStrtIdx, oldEndIdx) = curCheckSum
+        csval   = a `mod` m + ((fromIntegral b) `mod` m) `shiftL` size
+        m       = 2^size
+        size    = 16
+        bold    = oldChecksum `shiftR` size
+        aold    = oldChecksum .&. (m - 1)
+        xk      = head $ drop oldStrtIdx $ BL.unpack bs
+        xlPlus1 = head $ drop (oldEndIdx + 1) $BL.unpack bs
+        a       = aold - fromIntegral xk + fromIntegral xlPlus1
+        b       = a + bold - (fromIntegral (oldEndIdx - oldStrtIdx + 1))
 
 -- given the checksum of bytes from index: startIdx to endIdx, find
 -- the checksum for the block from (startIdx + 1 .. endIdx + 1)
